@@ -1,0 +1,79 @@
+const { Client, GatewayIntentBits, PermissionsBitField, EmbedBuilder } = require('discord.js');
+const express = require('express');
+const bodyParser = require('body-parser');
+const fs = require('fs');
+const app = express();
+
+// --- 1. THE PERMANENT DATABASE (Saves 4+ Players & Admins) ---
+const DB_PATH = './database.json';
+let db = { admins: ["Admin"], servers: {}, badges: {} };
+if (fs.existsSync(DB_PATH)) db = JSON.parse(fs.readFileSync(DB_PATH));
+
+const save = () => fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 4));
+
+// --- 2. THE BOT CORE (Admin Powers) ---
+const client = new Client({ intents: [3276799] });
+
+client.on('ready', () => console.log(`🛡️  System Online: ${client.user.tag}`));
+
+// Logic: If user has "Admin Badge" in DB, they get permissions automatically
+client.on('messageCreate', async (message) => {
+    if (!message.guild || message.author.bot) return;
+
+    // Command to Ban a Server (Only for Badge Holders)
+    if (message.content.startsWith('!banserver') && db.badges[message.author.id] === 'ADMIN_BADGE') {
+        const targetServerId = message.content.split(' ')[1];
+        const targetGuild = client.guilds.cache.get(targetServerId);
+        if (targetGuild) {
+            await targetGuild.leave(); // Bot leaves the server to "shut it down"
+            message.reply(`✅ Server ${targetServerId} has been blacklisted.`);
+        }
+    }
+});
+
+// --- 3. THE WEB PORTAL (Email Login & Server Creation) ---
+app.use(bodyParser.urlencoded({ extended: true }));
+
+app.get('/', (req, res) => {
+    res.send(`
+        <body style="background:#36393f; color:white; font-family:sans-serif; text-align:center;">
+            <h1>Log in to Discord Clone</h1>
+            <form action="/dashboard" method="POST" style="background:#2f3136; padding:20px; display:inline-block; border-radius:8px;">
+                <input type="email" name="email" placeholder="Email" required style="padding:10px; width:200px;"><br><br>
+                <input type="password" placeholder="Password" style="padding:10px; width:200px;"><br><br>
+                <button type="submit" style="background:#5865f2; color:white; border:none; padding:10px 20px; cursor:pointer;">Login</button>
+            </form>
+        </body>
+    `);
+});
+
+app.post('/dashboard', (req, res) => {
+    res.send(`
+        <body style="background:#36393f; color:white; font-family:sans-serif; text-align:center;">
+            <h1>Welcome, ${req.body.email}</h1>
+            <div style="border:1px solid #ccc; padding:20px; display:inline-block;">
+                <h3>Create New Server</h3>
+                <form action="/create-server" method="POST">
+                    <input type="text" name="serverName" placeholder="Server Name">
+                    <button type="submit">Create</button>
+                </form>
+            </div>
+            <p><a href="/support" style="color:#00aff4;">Open Support Ticket</a></p>
+        </body>
+    `);
+});
+
+// --- 4. SERVER & PERMISSION LOGIC ---
+app.post('/create-server', async (req, res) => {
+    const guild = client.guilds.cache.first(); // Simplified: Bot creates a category/channels as a "server"
+    const channel = await guild.channels.create({ name: req.body.serverName, type: 4 }); // Category
+    
+    // Save to database forever
+    db.servers[channel.id] = { owner: "User", admins: [] };
+    save();
+    
+    res.send(`<h1>Server ${req.body.serverName} Created!</h1><p>You have full Owner permissions.</p>`);
+});
+
+app.listen(process.env.PORT || 3000);
+client.login(process.env.TOKEN);
